@@ -1,22 +1,41 @@
 import numpy as np
 
 
-def compress_img(img, compress_strength):
+def compress_img(img, downsize_by, iters):
     """
     Downsizes image by reducing its colors.
     Colors are computed by clustering, K-mean algorythm
     :param img: image as matrix of colors (array of nd vectors)
-    :param compress_strength: 0.0 for only one color in final image, 1.0 for no compress at all
+    :param downsize_by: 0.0 for only one color in final image, 1.0 for no compress at all
+    :param iters: number of centroid sets to choose from
     :return: compressed image
     """
 
     img = np.array(img)
     init_colors = _get_colors(img)
-    iters = 50  # number of centroid sets to choose from
-    k = np.floor(float(len(init_colors)) * compress_strength)
+    k = np.floor(float(len(init_colors)) * downsize_by)
     if k == 0:
         k = 1
     best_centroids = _get_optimal_centroids(img, k, iters)
+
+    return recolor_img(img, best_centroids)
+
+
+def compress_img_by_k(img, k, iters):
+    """
+    Downsizes image by reducing its colors.
+    Colors are computed by clustering, K-mean algorythm
+    :param k: colors number
+    :param img: image as matrix of colors (array of nd vectors)
+    :param iters: number of centroid sets to choose from
+    :return: compressed image
+    """
+
+    img = np.array(img)
+    init_colors = _get_colors(img)
+    if k <= 0:
+        k = 1
+    best_centroids = _get_optimal_centroids(img, init_colors, k, iters)
 
     return recolor_img(img, best_centroids)
 
@@ -26,11 +45,11 @@ def recolor_img(img, colors):
     cid = _get_cid(img, colors)
     m = img.shape[0]
     for i in range(m):
-        new_img[i] = colors[cid[i]]
+        new_img[i] = colors[int(cid[i])]
     return new_img
 
 
-def _get_optimal_centroids(x, k, iters):
+def _get_optimal_centroids(x, start_points, k, iters):
     """
     :param x: data set
     :param k: centroids number
@@ -41,7 +60,7 @@ def _get_optimal_centroids(x, k, iters):
     all_centroids = []
     all_costs = np.zeros((iters,))
     for i in range(iters):
-        centroids = _fit_centroids(x, k)
+        centroids = _fit_centroids(x, start_points, k)
         cid = _get_cid(x, centroids)
         all_centroids.append(centroids)
         all_costs[i] = _compute_cost(x, cid, centroids)
@@ -49,20 +68,21 @@ def _get_optimal_centroids(x, k, iters):
     return all_centroids[best_id]
 
 
-def _fit_centroids(x, k):
+def _fit_centroids(x, start_points, k):
     """
     :param x: data set
     :param k: centroids number
     :return: computed centroids
     """
 
-    min_delta = 0.001
-    centroids = _get_random_centroids(x, k)
+    min_delta = 1
+    centroids = _get_random_centroids(start_points, k)
     prev_cost = -min_delta
     cost = min_delta
-    while np.abs(cost - prev_cost) <= min_delta:
+    while np.abs(cost - prev_cost) > min_delta:
         cid = _get_cid(x, centroids)
-        centroids = _compute_centroids(x, cid, centroids)
+        centroids = _compute_centroids(x, cid, k)
+        prev_cost = cost
         cost = _compute_cost(x, cid, centroids)
     return centroids
 
@@ -76,9 +96,15 @@ def _get_colors(img):
     colors_map = dict()
     m = img.shape[0]
     for i in range(m):
-        color = img[i]
-        colors_map[color] = 1
-    return np.array(colors_map)
+        color = img[i].tolist()
+        color_tuple = tuple(color)
+        colors_map[color_tuple] = 1
+    colors = []
+    color_tuples = list(colors_map.keys())
+    m = len(color_tuples)
+    for i in range(m):
+        colors.append(list(color_tuples[i]))
+    return colors
 
 
 def _get_random_centroids(v, k):
@@ -87,9 +113,12 @@ def _get_random_centroids(v, k):
     :param k: number of total centroids
     :return: random centroids
     """
-
-    centroids = np.random.choice(v, size=k, replace=False)
-    return centroids
+    ids = list(range(np.array(v).shape[0]))
+    rand = np.random.choice(ids, size=k, replace=False)
+    centroids = []
+    for i in range(k):
+        centroids.append(v[rand[i]])
+    return np.array(centroids)
 
 
 def _get_cid(x, centroids):
@@ -105,7 +134,7 @@ def _get_cid(x, centroids):
     for i in range(m):
         distances = np.zeros((k,))
         for j in range(k):
-            distances[j] = np.mod(x[i], centroids[j])
+            distances[j] = np.linalg.norm(x[i] - centroids[j])
         cid[i] = np.argmin(distances)
     return cid
 
@@ -118,10 +147,10 @@ def _compute_centroids(x, cid, k):
     :return: centers of each cluster
     """
 
-    centroids = np.zeros((k,))
+    centroids = []
     for i in range(k):
-        centroids[i] = np.mean(x[cid == i])
-    return centroids
+        centroids.append(np.mean(x[cid == i], axis=0))
+    return np.array(centroids)
 
 
 def _compute_cost(x, cid, centroids):
@@ -135,6 +164,7 @@ def _compute_cost(x, cid, centroids):
     m = x.shape[0]
     cost = 0
     for i in range(m):
-        cost += np.mod(x[i] - centroids[cid[i]]) ** 2
+        v = x[i] - centroids[int(cid[i])]
+        cost += np.linalg.norm(v)**2
     cost /= m
     return cost
